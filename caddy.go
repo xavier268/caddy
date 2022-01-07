@@ -291,7 +291,7 @@ func unsyncedDecodeAndRun(cfgJSON []byte, allowPersist bool) error {
 	// Stop, Cleanup each old app
 	// TODO: temporary while debugging, some sentinel logger names, to make sure we are in fact stopping the old config
 	var loggers []string
-	if oldCfg.Logging != nil {
+	if oldCfg != nil && oldCfg.Logging != nil {
 		for l := range oldCfg.Logging.Logs {
 			loggers = append(loggers, l)
 		}
