@@ -24,6 +24,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // Listen returns a listener suitable for use in a Caddy module.
@@ -105,7 +107,7 @@ func ListenPacket(network, addr string) (net.PacketConn, error) {
 type fakeCloseListener struct {
 	closed       int32       // accessed atomically; belongs to this struct only
 	usage        *int32      // accessed atomically; global
-	deadline     *bool       // protected by deadlineMu; global
+	deadline     *bool       // protected by deadlineMu; global; whether deadline is currently set in the past
 	deadlineMu   *sync.Mutex // global
 	key          string      // global, but read-only, so can be copy
 	net.Listener             // global
@@ -115,6 +117,7 @@ type fakeCloseListener struct {
 func (fcl *fakeCloseListener) Accept() (net.Conn, error) {
 	// if the listener is already "closed", return error
 	if atomic.LoadInt32(&fcl.closed) == 1 {
+		Log().Named("admintemp").Debug("accept: listener already fake-closed", zap.String("addr", fcl.Addr().String()))
 		return nil, fcl.fakeClosedErr()
 	}
 
@@ -124,17 +127,23 @@ func (fcl *fakeCloseListener) Accept() (net.Conn, error) {
 		return conn, nil
 	}
 
+	Log().Named("admintemp").Debug("accept: underlying returned with error", zap.String("addr", fcl.Addr().String()), zap.Error(err))
+
 	// accept returned with error
 	// TODO: This may be better as a condition variable so the deadline is cleared only once?
 	fcl.deadlineMu.Lock()
 	if *fcl.deadline {
+		var err2 error
 		switch ln := fcl.Listener.(type) {
 		case *net.TCPListener:
-			_ = ln.SetDeadline(time.Time{})
+			err2 = ln.SetDeadline(time.Time{})
 		case *net.UnixListener:
-			_ = ln.SetDeadline(time.Time{})
+			err2 = ln.SetDeadline(time.Time{})
 		}
 		*fcl.deadline = false
+		Log().Named("admintemp").Debug("accept: cleared deadline", zap.String("addr", fcl.Addr().String()), zap.Error(err2))
+	} else {
+		Log().Named("admintemp").Debug("accept: no deadline to clear", zap.String("addr", fcl.Addr().String()))
 	}
 	fcl.deadlineMu.Unlock()
 
@@ -145,6 +154,7 @@ func (fcl *fakeCloseListener) Accept() (net.Conn, error) {
 		// if we return the timeout error instead, callers might
 		// simply retry, leaking goroutines for longer
 		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			Log().Named("admintemp").Debug("accept: listener now fake-closed; error was timeout, so returning fake-closed error", zap.String("addr", fcl.Addr().String()))
 			return nil, fcl.fakeClosedErr()
 		}
 	}
@@ -157,6 +167,7 @@ func (fcl *fakeCloseListener) Accept() (net.Conn, error) {
 // else is using it.
 func (fcl *fakeCloseListener) Close() error {
 	if atomic.CompareAndSwapInt32(&fcl.closed, 0, 1) {
+		Log().Named("admintemp").Debug("close: first to close listener", zap.String("addr", fcl.Addr().String()))
 		// unfortunately, there is no way to cancel any
 		// currently-blocking calls to Accept() that are
 		// awaiting connections since we're not actually
@@ -166,13 +177,15 @@ func (fcl *fakeCloseListener) Close() error {
 		// certain types of listeners...
 		fcl.deadlineMu.Lock()
 		if !*fcl.deadline {
+			var err2 error
 			switch ln := fcl.Listener.(type) {
 			case *net.TCPListener:
-				_ = ln.SetDeadline(time.Now().Add(-1 * time.Minute))
+				err2 = ln.SetDeadline(time.Now().Add(-1 * time.Minute))
 			case *net.UnixListener:
-				_ = ln.SetDeadline(time.Now().Add(-1 * time.Minute))
+				err2 = ln.SetDeadline(time.Now().Add(-1 * time.Minute))
 			}
 			*fcl.deadline = true
+			Log().Named("admintemp").Debug("close: set deadline in the past", zap.String("addr", fcl.Addr().String()), zap.Error(err2))
 		}
 		fcl.deadlineMu.Unlock()
 
@@ -184,6 +197,7 @@ func (fcl *fakeCloseListener) Close() error {
 			delete(listeners, fcl.key)
 			listenersMu.Unlock()
 			err := fcl.Listener.Close()
+			Log().Named("admintemp").Debug("close: closing listener for real (no more uses)", zap.String("addr", fcl.Addr().String()))
 			if err != nil {
 				return err
 			}

@@ -61,9 +61,11 @@ func NewContext(ctx Context) (Context, context.CancelFunc) {
 		}
 
 		for modName, modInstances := range newCtx.moduleInstances {
-			for _, inst := range modInstances {
+			for i, inst := range modInstances {
 				if cu, ok := inst.(CleanerUpper); ok {
+					Log().Named("admintemp").Debug("cleaning up module instance", zap.String("module", modName), zap.Int("instance", i))
 					err := cu.Cleanup()
+					Log().Named("admintemp").Debug("finished cleaning up module instance", zap.String("module", modName), zap.Int("instance", i))
 					if err != nil {
 						log.Printf("[ERROR] %s (%p): cleanup: %v", modName, inst, err)
 					}
