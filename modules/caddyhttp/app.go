@@ -418,10 +418,12 @@ func (app *App) Stop() error {
 		defer cancel()
 	}
 	for _, s := range app.servers {
+		app.logger.Named("admintemp").Debug("shutting down server", zap.String("addr", s.Addr))
 		err := s.Shutdown(ctx)
 		if err != nil {
 			return err
 		}
+		app.logger.Named("admintemp").Debug("finished shutting down server", zap.String("addr", s.Addr))
 	}
 
 	// close the http3 servers; it's unclear whether the bug reported in
@@ -434,10 +436,12 @@ func (app *App) Stop() error {
 	for _, s := range app.h3servers {
 		// TODO: CloseGracefully, once implemented upstream
 		// (see https://github.com/lucas-clemente/quic-go/issues/2103)
+		app.logger.Named("admintemp").Debug("closing HTTP3 server", zap.String("addr", s.Addr))
 		err := s.Close()
 		if err != nil {
 			return err
 		}
+		app.logger.Named("admintemp").Debug("finished closing HTTP3 server", zap.String("addr", s.Addr))
 	}
 
 	// closing an http3.Server does not close their underlying listeners
@@ -445,10 +449,12 @@ func (app *App) Stop() error {
 	// clients at the same time; so we need to manually call Close()
 	// on the underlying h3 listeners (see lucas-clemente/quic-go#2103)
 	for _, pc := range app.h3listeners {
+		app.logger.Named("admintemp").Debug("closing HTTP3 listener", zap.String("addr", pc.LocalAddr().String()))
 		err := pc.Close()
 		if err != nil {
 			return err
 		}
+		app.logger.Named("admintemp").Debug("finished closing HTTP3 listener", zap.String("addr", pc.LocalAddr().String()))
 	}
 	return nil
 }

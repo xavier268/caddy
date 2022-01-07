@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
 	"path"
@@ -130,8 +129,13 @@ func changeConfig(method, path string, input []byte, forceReload bool) error {
 		return fmt.Errorf("method not allowed")
 	}
 
+	Log().Named("admintemp").Debug("acquiring lock on currentCfgMu")
 	currentCfgMu.Lock()
-	defer currentCfgMu.Unlock()
+	Log().Named("admintemp").Debug("acquired lock on currentCfgMu")
+	defer func() {
+		Log().Named("admintemp").Debug("unlocking currentCfgMu")
+		currentCfgMu.Unlock()
+	}()
 
 	err := unsyncedConfigAccess(method, path, input, nil)
 	if err != nil {
@@ -273,17 +277,28 @@ func unsyncedDecodeAndRun(cfgJSON []byte, allowPersist bool) error {
 	}
 
 	// run the new config and start all its apps
+	Log().Named("admintemp").Debug("starting new config")
 	err = run(newCfg, true)
 	if err != nil {
 		return err
 	}
+	Log().Named("admintemp").Debug("finished starting new config")
 
 	// swap old config with the new one
 	oldCfg := currentCfg
 	currentCfg = newCfg
 
 	// Stop, Cleanup each old app
+	// TODO: temporary while debugging, some sentinel logger names, to make sure we are in fact stopping the old config
+	var loggers []string
+	if oldCfg.Logging != nil {
+		for l := range oldCfg.Logging.Logs {
+			loggers = append(loggers, l)
+		}
+	}
+	Log().Named("admintemp").Debug("stopping previous config", zap.Strings("loggers", loggers))
 	unsyncedStop(oldCfg)
+	Log().Named("admintemp").Debug("finished stopping previous config", zap.Strings("loggers", loggers))
 
 	// autosave a non-nil config, if not disabled
 	if allowPersist &&
@@ -538,14 +553,18 @@ func unsyncedStop(cfg *Config) {
 
 	// stop each app
 	for name, a := range cfg.apps {
+		Log().Named("admintemp").Debug("stopping app", zap.String("app", name))
 		err := a.Stop()
 		if err != nil {
-			log.Printf("[ERROR] stop %s: %v", name, err)
+			Log().Error("stopping app", zap.String("app", name), zap.Error(err))
 		}
+		Log().Named("admintemp").Debug("finished stopping app", zap.String("app", name))
 	}
 
 	// clean up all modules
+	Log().Named("admintemp").Debug("canceling old config context (module cleanup)")
 	cfg.cancelFunc()
+	Log().Named("admintemp").Debug("finished canceling old config context")
 }
 
 // Validate loads, provisions, and validates
