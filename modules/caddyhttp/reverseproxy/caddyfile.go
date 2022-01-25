@@ -1056,7 +1056,7 @@ func (h *HTTPTransport) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 
 // UnmarshalCaddyfile deserializes Caddyfile tokens into h.
 //
-//     dynamic srv [<address>] {
+//     dynamic srv [<name>] {
 //         service             <service>
 //         proto               <proto>
 //         name                <name>
@@ -1073,13 +1073,7 @@ func (u *SRVUpstreams) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 			return d.ArgErr()
 		}
 		if len(args) > 0 {
-			service, proto, name, err := u.ParseAddress(args[0])
-			if err != nil {
-				return err
-			}
-			u.Service = service
-			u.Proto = proto
-			u.Name = name
+			u.Name = args[0]
 		}
 
 		for d.NextBlock(0) {
