@@ -100,6 +100,11 @@ func (su SRVUpstreams) GetUpstreams(r *http.Request) ([]*Upstream, error) {
 	proto := repl.ReplaceAll(su.Proto, "")
 	name := repl.ReplaceAll(su.Name, "")
 
+	su.logger.Debug("refreshing SRV upstreams",
+		zap.String("service", service),
+		zap.String("proto", proto),
+		zap.String("name", name))
+
 	_, records, err := net.DefaultResolver.LookupSRV(r.Context(), service, proto, name)
 	if err != nil {
 		// From LookupSRV docs: "If the response contains invalid names, those records are filtered
@@ -113,8 +118,14 @@ func (su SRVUpstreams) GetUpstreams(r *http.Request) ([]*Upstream, error) {
 
 	upstreams := make([]*Upstream, len(records))
 	for i, rec := range records {
+		su.logger.Debug("discovered SRV record",
+			zap.String("target", rec.Target),
+			zap.Uint16("port", rec.Port),
+			zap.Uint16("priority", rec.Priority),
+			zap.Uint16("weight", rec.Weight))
+		addr := net.JoinHostPort(rec.Target, strconv.Itoa(int(rec.Port)))
 		upstreams[i] = &Upstream{
-			Dial: net.JoinHostPort(rec.Target, strconv.Itoa(int(rec.Port))),
+			Dial: net.JoinHostPort(rec.Target, addr),
 		}
 	}
 
